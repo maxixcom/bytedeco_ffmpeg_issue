@@ -40,5 +40,10 @@ Output #0, mpegts, to 'media/sample-1.ts':
 Process finished with exit code 130 (interrupted by signal 2:SIGINT)
 ```
 
+## Compile and Run with mvn wrapper
+
+```shell
+./mvnw compile exec:java
+```
 
 
