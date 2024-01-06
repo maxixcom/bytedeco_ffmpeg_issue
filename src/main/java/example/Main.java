@@ -100,12 +100,13 @@ public class Main implements Runnable {
             av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
             if ((ofmt.flags() & AVFMT_NOFILE) == 0) {
-                ret = avio_open(ofmt_ctx.pb(), out_filename, AVIO_FLAG_WRITE);
+                ret = avio_open(pb, out_filename, AVIO_FLAG_WRITE);
                 if (ret < 0) {
                     System.err.printf("Could not open output file '%s'\n", out_filename);
                     return;
                 }
             }
+            ofmt_ctx.pb(pb);
 
             ret = avformat_write_header(ofmt_ctx, (AVDictionary) null);
             if (ret < 0) {
