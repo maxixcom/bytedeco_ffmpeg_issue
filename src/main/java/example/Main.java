@@ -40,6 +40,7 @@ public class Main implements Runnable {
         int stream_index = 0;
         Map<Integer, Integer> stream_mapping = new HashMap<>();
 
+        AVIOContext pb = new AVIOContext();
 
         pkt = av_packet_alloc();
         if (pkt == null) {
@@ -66,7 +67,7 @@ public class Main implements Runnable {
                 return;
             }
 
-            ofmt_ctx.pb(new AVIOContext());
+            ofmt_ctx.pb(pb);
             ofmt = ofmt_ctx.oformat();
 
             for (int i = 0; i < ifmt_ctx.nb_streams(); i++) {
@@ -138,7 +139,6 @@ public class Main implements Runnable {
                 System.out.printf("(out) Stream %d PTS %d, DTS %d, Duration %d\n",
                         pkt.stream_index(), pkt.pts(), pkt.dts(), pkt.duration());
 
-//                ret = av_write_frame(ofmt_ctx, pkt);
                 ret = av_interleaved_write_frame(ofmt_ctx, pkt);
                 /* pkt is now blank (av_interleaved_write_frame() takes ownership of
                  * its contents and resets pkt), so that no unreferencing is necessary.
