@@ -7,7 +7,9 @@ import org.bytedeco.ffmpeg.avformat.AVIOContext;
 import org.bytedeco.ffmpeg.avformat.AVOutputFormat;
 import org.bytedeco.ffmpeg.avformat.AVStream;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
+import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.Pointer;
+import org.bytedeco.javacpp.PointerPointer;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -99,13 +101,15 @@ public class Main implements Runnable {
             }
             av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
-            if ((ofmt.flags() & AVFMT_NOFILE) == 0) {
-                ret = avio_open(pb, out_filename, AVIO_FLAG_WRITE);
-                if (ret < 0) {
-                    System.err.printf("Could not open output file '%s'\n", out_filename);
-                    return;
-                }
-            }
+//            if ((ofmt.flags() & AVFMT_NOFILE) == 0) {
+//                ret = avio_open(pb, out_filename, AVIO_FLAG_WRITE);
+//                if (ret < 0) {
+//                    System.err.printf("Could not open output file '%s'\n", out_filename);
+//                    return;
+//                }
+//            }
+
+            avio_open_dyn_buf(pb);
             ofmt_ctx.pb(pb);
 
             ret = avformat_write_header(ofmt_ctx, (AVDictionary) null);
@@ -113,6 +117,16 @@ public class Main implements Runnable {
                 System.err.print("Error occurred when opening output file\n");
                 return;
             }
+
+            BytePointer bufHeader = new BytePointer();
+            int num_bytes = avio_close_dyn_buf(pb, bufHeader);
+            if(num_bytes>0) {
+                byte[] buf_arr = new byte[num_bytes];
+                bufHeader.get(buf_arr);
+                System.out.printf("Header Buf bytes: %d, array length: %d\n", num_bytes, buf_arr.length);
+            }
+            av_free(bufHeader);
+
 
             while (true) {
                 AVStream in_stream, out_stream;
@@ -128,19 +142,33 @@ public class Main implements Runnable {
                     continue;
                 }
 
+//                if(pkt.pos()<513782) {
+//                    av_packet_unref(pkt);
+//                    continue;
+//                }
+//
+//                if(pkt.pos()> 1929659) {
+//                    av_packet_unref(pkt);
+//                    break;
+//                }
 
                 pkt.stream_index(stream_mapping.get(pkt.stream_index()));
                 out_stream = ofmt_ctx.streams(pkt.stream_index());
-                System.out.printf("(in) Stream %d PTS %d, DTS %d, Duration %d\n",
-                        pkt.stream_index(), pkt.pts(), pkt.dts(), pkt.duration());
+                System.out.printf("(in) Stream %d Pos %d PTS %d, DTS %d, Duration %d\n",
+                        pkt.stream_index(), pkt.pos(), pkt.pts(), pkt.dts(), pkt.duration());
 
                 av_packet_rescale_ts(pkt, in_stream.time_base(), out_stream.time_base());
-                pkt.pos(-1);
+//                pkt.pos(-1);
 
-                System.out.printf("(out) Stream %d PTS %d, DTS %d, Duration %d\n",
-                        pkt.stream_index(), pkt.pts(), pkt.dts(), pkt.duration());
+                System.out.printf("(out) Stream %d Pos %d PTS %d, DTS %d, Duration %d\n",
+                        pkt.stream_index(), pkt.pos(), pkt.pts(), pkt.dts(), pkt.duration());
 
-                ret = av_interleaved_write_frame(ofmt_ctx, pkt);
+                // init dyn buf
+                avio_open_dyn_buf(pb);
+                ofmt_ctx.pb(pb);
+
+//                ret = av_interleaved_write_frame(ofmt_ctx, pkt);
+                ret = av_write_frame(ofmt_ctx, pkt);
                 /* pkt is now blank (av_interleaved_write_frame() takes ownership of
                  * its contents and resets pkt), so that no unreferencing is necessary.
                  * This would be different if one used av_write_frame(). */
@@ -148,18 +176,42 @@ public class Main implements Runnable {
                     System.out.print("Error muxing packet\n");
                     break;
                 }
+
+                // We can do it all the time even with trailer
+                // get written bytes data
+                BytePointer buf = new BytePointer();
+                int num_bytes_header = avio_close_dyn_buf(pb, buf);
+                if(num_bytes_header>0) {
+                    byte[] buf_arr = new byte[num_bytes_header];
+                    buf.get(buf_arr);
+                    System.out.printf("Buf bytes: %d, array length: %d\n", num_bytes_header, buf_arr.length);
+                }
+                av_free(buf);
             }
 
+            // init dyn buf
+            avio_open_dyn_buf(pb);
+            ofmt_ctx.pb(pb);
+
             av_write_trailer(ofmt_ctx);
+
+            BytePointer buf = new BytePointer();
+            int num_bytes_trailer = avio_close_dyn_buf(pb, buf);
+            if(num_bytes_trailer>0) {
+                byte[] buf_arr = new byte[num_bytes_trailer];
+                buf.get(buf_arr);
+                System.out.printf("Buf trailer bytes: %d, array length: %d\n", num_bytes_trailer, buf_arr.length);
+            }
+            av_free(buf);
 
         } finally {
             av_packet_free(pkt);
             avformat_close_input(ifmt_ctx);
 
             /* close output */
-            if (ofmt_ctx != null && ofmt != null && ((ofmt.flags() & AVFMT_NOFILE) == 0)) {
-                avio_closep(ofmt_ctx.pb());
-            }
+//            if (ofmt_ctx != null && ofmt != null && ((ofmt.flags() & AVFMT_NOFILE) == 0)) {
+//                avio_closep(ofmt_ctx.pb());
+//            }
             avformat_free_context(ofmt_ctx);
 
             if (ret < 0 && ret != AVERROR_EOF) {
