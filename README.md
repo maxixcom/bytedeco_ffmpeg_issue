@@ -1,4 +1,4 @@
-# bytedeco ffmpeg issue example
+# bytedeco ffmpeg issue example (Solved)
 
 This code  is based on ffmpeg example [remux.c](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/remux.c)
 Program blocks on writing to output file (I guess) with `av_interleaved_write_frame`.
@@ -45,5 +45,9 @@ Process finished with exit code 130 (interrupted by signal 2:SIGINT)
 ```shell
 ./mvnw compile exec:java
 ```
+
+## Issue
+
+[https://github.com/bytedeco/javacpp-presets/issues/1457#event-11410663172](https://github.com/bytedeco/javacpp-presets/issues/1457#event-11410663172)
 
 
