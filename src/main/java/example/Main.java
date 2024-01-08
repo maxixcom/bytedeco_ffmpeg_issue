@@ -2,15 +2,15 @@ package example;
 
 import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
-import org.bytedeco.ffmpeg.avformat.AVFormatContext;
-import org.bytedeco.ffmpeg.avformat.AVIOContext;
-import org.bytedeco.ffmpeg.avformat.AVOutputFormat;
-import org.bytedeco.ffmpeg.avformat.AVStream;
+import org.bytedeco.ffmpeg.avformat.*;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
+import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.Pointer;
 
+import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.bytedeco.ffmpeg.global.avcodec.*;
 import static org.bytedeco.ffmpeg.global.avformat.*;
@@ -40,7 +40,7 @@ public class Main implements Runnable {
         int stream_index = 0;
         Map<Integer, Integer> stream_mapping = new HashMap<>();
 
-        AVIOContext pb = new AVIOContext();
+        AVIOContext pb;
 
         pkt = av_packet_alloc();
         if (pkt == null) {
@@ -67,7 +67,6 @@ public class Main implements Runnable {
                 return;
             }
 
-            ofmt_ctx.pb(pb);
             ofmt = ofmt_ctx.oformat();
 
             for (int i = 0; i < ifmt_ctx.nb_streams(); i++) {
@@ -99,13 +98,17 @@ public class Main implements Runnable {
             }
             av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
-            if ((ofmt.flags() & AVFMT_NOFILE) == 0) {
-                ret = avio_open(pb, out_filename, AVIO_FLAG_WRITE);
-                if (ret < 0) {
-                    System.err.printf("Could not open output file '%s'\n", out_filename);
-                    return;
-                }
-            }
+//            if ((ofmt.flags() & AVFMT_NOFILE) == 0) {
+//                ret = avio_open(pb, out_filename, AVIO_FLAG_WRITE);
+//                if (ret < 0) {
+//                    System.err.printf("Could not open output file '%s'\n", out_filename);
+//                    return;
+//                }
+//            }
+//            ofmt_ctx.pb(pb);
+
+            outputStreams.put(ofmt_ctx, new ByteArrayOutputStream());
+            pb = this.getAVIOContextForWrite(ofmt_ctx);
             ofmt_ctx.pb(pb);
 
             ret = avformat_write_header(ofmt_ctx, (AVDictionary) null);
@@ -152,14 +155,23 @@ public class Main implements Runnable {
 
             av_write_trailer(ofmt_ctx);
 
+
+            ByteArrayOutputStream outputStream = outputStreams.get(ofmt_ctx);
+            try (FileOutputStream fileOutputStream = new FileOutputStream(out_filename)) {
+                fileOutputStream.write(outputStream.toByteArray());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
         } finally {
             av_packet_free(pkt);
             avformat_close_input(ifmt_ctx);
 
             /* close output */
-            if (ofmt_ctx != null && ofmt != null && ((ofmt.flags() & AVFMT_NOFILE) == 0)) {
-                avio_closep(ofmt_ctx.pb());
-            }
+            // TODO: clean pb
+//            if (ofmt_ctx != null && ofmt != null && ((ofmt.flags() & AVFMT_NOFILE) == 0)) {
+//                avio_closep(ofmt_ctx.pb());
+//            }
             avformat_free_context(ofmt_ctx);
 
             if (ret < 0 && ret != AVERROR_EOF) {
@@ -168,6 +180,25 @@ public class Main implements Runnable {
         }
     }
 
+    private AVIOContext getAVIOContextForWrite(AVFormatContext fmt_ctx) {
+        final int BUFFER_SIZE=0x1000;
+        BytePointer bytePointer = new BytePointer(av_malloc(BUFFER_SIZE));
+
+        AVIOContext avioContext = avio_alloc_context(
+                bytePointer,
+                BUFFER_SIZE,
+                1,
+                fmt_ctx,
+                null,
+                writeCallback,
+                null
+        );
+
+
+        return avioContext;
+    }
+
+
     public static void main(String[] args) {
         Main main = new Main(
                 "media/sample-1.mp4",
@@ -175,6 +206,28 @@ public class Main implements Runnable {
         );
 
         main.run();
+        writeCallback.releaseReference();
     }
+
+    static Map<Pointer, ByteArrayOutputStream> outputStreams = new ConcurrentHashMap<>();
+    static WriteCallback writeCallback = new WriteCallback().retainReference();
+
+    static class WriteCallback extends Write_packet_Pointer_BytePointer_int {
+        @Override
+        public int call(Pointer opaque, BytePointer buf, int buf_size) {
+            byte[] byte_buf = new byte[buf_size];
+            buf.get(byte_buf);
+            OutputStream outputStream = outputStreams.get(opaque);
+            try {
+                outputStream.write(byte_buf);
+            } catch (IOException e) {
+                System.err.printf("Error writing to outpu stream: %s", e.getMessage());
+                return -1;
+            }
+            System.out.printf("Write block size %d\n", buf_size);
+            return buf_size;
+        }
+    }
+
 
 }

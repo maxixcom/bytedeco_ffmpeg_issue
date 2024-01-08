@@ -51,3 +51,11 @@ Process finished with exit code 130 (interrupted by signal 2:SIGINT)
 [https://github.com/bytedeco/javacpp-presets/issues/1457#event-11410663172](https://github.com/bytedeco/javacpp-presets/issues/1457#event-11410663172)
 
 
+
+
+## Links
+
+Custom IO
+
+https://groups.google.com/g/javacpp-project/c/kqEH8PwC1-Q
+https://github.com/bytedeco/javacpp/issues/539
