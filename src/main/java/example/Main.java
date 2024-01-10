@@ -9,6 +9,7 @@ import org.bytedeco.ffmpeg.avformat.AVStream;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
 import org.bytedeco.javacpp.Pointer;
 
+import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -23,6 +24,8 @@ public class Main implements Runnable {
     private final String in_filename;
     private final String out_filename;
 
+    ByteArrayOutputStream bs = new ByteArrayOutputStream();
+
     public Main(String inFilename, String outFilename) {
         in_filename = inFilename;
         out_filename = outFilename;
@@ -30,6 +33,7 @@ public class Main implements Runnable {
 
     @Override
     public void run() {
+
         AVPacket pkt = null;
         AVFormatContext ifmt_ctx = new AVFormatContext((Pointer) null);
         AVFormatContext ofmt_ctx = new AVFormatContext((Pointer) null);
@@ -128,6 +132,7 @@ public class Main implements Runnable {
                     continue;
                 }
 
+                testForNalUnits(pkt);
 
                 pkt.stream_index(stream_mapping.get(pkt.stream_index()));
                 out_stream = ofmt_ctx.streams(pkt.stream_index());
@@ -164,6 +169,56 @@ public class Main implements Runnable {
 
             if (ret < 0 && ret != AVERROR_EOF) {
                 System.err.printf("Error occurred: %d\n", ret);
+            }
+        }
+
+        try (FileOutputStream fos = new FileOutputStream(out_filename + ".v")) {
+            fos.write(bs.toByteArray());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void testForNalUnits(AVPacket pkt) {
+        if(pkt.size()==0) {
+            return;
+        }
+        byte[] data = new byte[pkt.size()];
+        pkt.data().get(data);
+
+        if (pkt.stream_index() != 0) {
+//            System.out.println("Nul> Skip Audio packet");
+            return;
+        }
+
+        try {
+            bs.write(data);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        int packetLength = data.length;
+        int pos = 0;
+        while (pos < packetLength) {
+            int prefix = 0;
+
+            if (data[pos] == 0) {
+                if ((pos + 1) < packetLength && data[pos + 1] == 0) {
+                    if ((pos + 2) < packetLength && data[pos + 2] == 1) {
+                        // Found - prefix = 3
+                        System.out.printf("Nul> Found prefix(3) - pos: %d\n", pos);
+                        prefix = 3;
+                    } else if ((pos + 3) < packetLength && data[pos + 2] == 0 && data[pos + 3] == 1) {
+                        // Found - prefix = 4
+                        prefix = 4;
+                        System.out.printf("Nul> Found prefix(4) - pos: %d\n", pos);
+                    }
+                }
+            }
+            if (prefix > 0) {
+                pos += prefix;
+            } else {
+                pos += 1;
             }
         }
     }
