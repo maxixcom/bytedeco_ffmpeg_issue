@@ -1,12 +1,12 @@
 package example;
 
+import org.bytedeco.ffmpeg.avcodec.AVBSFContext;
+import org.bytedeco.ffmpeg.avcodec.AVBitStreamFilter;
 import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
-import org.bytedeco.ffmpeg.avformat.AVFormatContext;
-import org.bytedeco.ffmpeg.avformat.AVIOContext;
-import org.bytedeco.ffmpeg.avformat.AVOutputFormat;
-import org.bytedeco.ffmpeg.avformat.AVStream;
+import org.bytedeco.ffmpeg.avformat.*;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
+import org.bytedeco.ffmpeg.avutil.AVRational;
 import org.bytedeco.javacpp.Pointer;
 
 import java.io.*;
@@ -26,6 +26,9 @@ public class Main implements Runnable {
 
     ByteArrayOutputStream bs = new ByteArrayOutputStream();
 
+    AVBitStreamFilter bsfilter;
+    AVBSFContext videoBsfFilterContext;
+
     public Main(String inFilename, String outFilename) {
         in_filename = inFilename;
         out_filename = outFilename;
@@ -33,13 +36,21 @@ public class Main implements Runnable {
 
     @Override
     public void run() {
+        int ret = 0;
+
+        bsfilter = av_bsf_get_by_name("h264_mp4toannexb");
+        videoBsfFilterContext = new AVBSFContext(null);
+        ret = av_bsf_alloc(bsfilter, videoBsfFilterContext);
+        if (ret < 0) {
+            System.out.println("cannot allocate bsf context");
+            return;
+        }
 
         AVPacket pkt = null;
         AVFormatContext ifmt_ctx = new AVFormatContext((Pointer) null);
         AVFormatContext ofmt_ctx = new AVFormatContext((Pointer) null);
 
         AVOutputFormat ofmt = null;
-        int ret = 0;
 
         int stream_index = 0;
         Map<Integer, Integer> stream_mapping = new HashMap<>();
@@ -100,6 +111,20 @@ public class Main implements Runnable {
                     return;
                 }
                 out_stream.codecpar().codec_tag(0);
+
+                if(out_stream.codecpar().codec_id() == AV_CODEC_ID_H264) {
+//                    AVBSFContext h264Mp4toannexb = initVideoBitstreamFilter(
+//                            "h264_mp4toannexb",
+//                            out_stream.codecpar(),
+//                            out_stream.time_base()
+//                    );
+//                    avcodec_parameters_copy(out_stream.codecpar(), h264Mp4toannexb.par_out());
+                    initVideoBitstreamFilter(out_stream.codecpar(),in_stream.time_base());
+                    avcodec_parameters_copy(out_stream.codecpar(), videoBsfFilterContext.par_out());
+                }
+
+
+
             }
             av_dump_format(ofmt_ctx, 0, out_filename, 1);
 
@@ -132,10 +157,21 @@ public class Main implements Runnable {
                     continue;
                 }
 
-                testForNalUnits(pkt);
+                if(in_stream.codecpar().codec_id() == AV_CODEC_ID_H264) {
+                    System.out.println("AV_CODEC_ID_H264");
+                    if((pkt.flags() & AV_PKT_FLAG_KEY)>0) {
+                        System.out.println("(keyframe) AV_PKT_FLAG_KEY");
+                    }
+                    else {
+                        System.out.println("(no keyframe)");
+                    }
+                    testForNalUnits(pkt);
+
+                }
 
                 pkt.stream_index(stream_mapping.get(pkt.stream_index()));
                 out_stream = ofmt_ctx.streams(pkt.stream_index());
+
                 System.out.printf("(in) Stream %d PTS %d, DTS %d, Duration %d\n",
                         pkt.stream_index(), pkt.pts(), pkt.dts(), pkt.duration());
 
@@ -183,6 +219,18 @@ public class Main implements Runnable {
         if(pkt.size()==0) {
             return;
         }
+
+//        int ret = av_bsf_send_packet(videoBsfFilterContext, pkt);
+//        if(ret<0) {
+//            System.err.println("Error Sending packet to filter failed");
+//            return;
+//        }
+//        ret = av_bsf_receive_packet(videoBsfFilterContext, pkt);
+//        if(ret<0) {
+//            System.err.println("Error Receiving packet to filter failed");
+//            return;
+//        }
+
         byte[] data = new byte[pkt.size()];
         pkt.data().get(data);
 
@@ -222,6 +270,64 @@ public class Main implements Runnable {
             }
         }
     }
+
+    private  AVBSFContext createVideoBitstreamFilter(String bsfVideoName) {
+        bsfilter = av_bsf_get_by_name(bsfVideoName);
+        AVBSFContext videoBsfFilterContext = new AVBSFContext(null);
+        int ret = av_bsf_alloc(bsfilter, videoBsfFilterContext);
+
+        if (ret < 0) {
+            System.out.println("cannot allocate bsf context");
+            return null;
+        }
+
+        return videoBsfFilterContext;
+    }
+
+    private void initVideoBitstreamFilter(AVCodecParameters codecParameters, AVRational timebase) {
+        int ret = avcodec_parameters_copy(videoBsfFilterContext.par_in(), codecParameters);
+        if (ret < 0) {
+            System.out.println("cannot copy input codec parameters");
+            return;
+        }
+
+        videoBsfFilterContext.time_base_in(timebase);
+        ret = av_bsf_init(videoBsfFilterContext);
+        if (ret < 0) {
+            System.out.println("cannot init bit stream filter context");
+            return;
+        }
+    }
+
+
+
+    private AVBSFContext initVideoBitstreamFilter(String bsfVideoName, AVCodecParameters codecParameters, AVRational timebase) {
+        AVBitStreamFilter bsfilter = av_bsf_get_by_name(bsfVideoName);
+        AVBSFContext videoBsfFilterContext = new AVBSFContext(null);
+        int ret = av_bsf_alloc(bsfilter, videoBsfFilterContext);
+
+        if (ret < 0) {
+            System.out.println("cannot allocate bsf context");
+            return null;
+        }
+
+        ret = avcodec_parameters_copy(videoBsfFilterContext.par_in(), codecParameters);
+        if (ret < 0) {
+            System.out.println("cannot copy input codec parameters");
+            return null;
+        }
+
+        videoBsfFilterContext.time_base_in(timebase);
+        ret = av_bsf_init(videoBsfFilterContext);
+        if (ret < 0) {
+            System.out.println("cannot init bit stream filter context");
+            return null;
+        }
+
+        return videoBsfFilterContext;
+    }
+
+
 
     public static void main(String[] args) {
         Main main = new Main(
